@@ -13,6 +13,7 @@ const startBtn=$("startBtn"),stopBtn=$("stopBtn"),statusText=$("statusText"),sta
 const volume=$("volume"),volumeValue=$("volumeValue"),meterBar=$("meterBar"),levelText=$("levelText");
 const echo=$("echo"),noise=$("noise"),autoGain=$("autoGain");
 const outputText=$("outputText");
+const outputBtn=$("outputBtn");
 
 volume.addEventListener("input",()=>{
   volumeValue.textContent=Math.round(volume.value*100)+"%";
@@ -27,6 +28,24 @@ function setStatus(on,title,detail){
 
 function setOutputStatus(text){
   if(outputText)outputText.textContent=text;
+}
+
+async function chooseAudioOutput(){
+  if(!navigator.mediaDevices?.selectAudioOutput){
+    setOutputStatus("Browser HP ini belum menyediakan pemilihan speaker dari PWA.");
+    return null;
+  }
+
+  try{
+    const device=await navigator.mediaDevices.selectAudioOutput();
+    selectedOutputId=device.deviceId;
+    setOutputStatus("Dipilih: "+(device.label||"speaker Bluetooth"));
+    return device;
+  }catch(err){
+    console.warn("Pemilihan output dibatalkan/gagal:",err);
+    setOutputStatus("Speaker belum dipilih.");
+    return null;
+  }
 }
 
 async function findBluetoothOutput(){
@@ -58,7 +77,9 @@ async function routeAudioToBluetooth(){
     return false;
   }
 
-  const device=await findBluetoothOutput();
+  const device=selectedOutputId
+    ? (await navigator.mediaDevices.enumerateDevices()).find(d=>d.kind==="audiooutput" && d.deviceId===selectedOutputId)
+    : await findBluetoothOutput();
   if(!device){
     setOutputStatus("Boom 2 SE tidak terdeteksi sebagai output browser. Bluetooth tetap harus tersambung.");
     return false;
@@ -97,6 +118,12 @@ async function startMic(){
       },
       video:false
     });
+
+    // Jika browser mendukung pemilihan output, minta user memilih speaker
+    // saat tombol MULAI MIC ditekan (masih berada dalam gesture user).
+    if(!selectedOutputId && navigator.mediaDevices?.selectAudioOutput){
+      await chooseAudioOutput();
+    }
 
     audioContext=new (window.AudioContext||window.webkitAudioContext)({
       latencyHint:"interactive"
@@ -202,3 +229,16 @@ function drawMeter(){
 startBtn.addEventListener("click",startMic);
 stopBtn.addEventListener("click",stopMic);
 window.addEventListener("pagehide",stopMic);
+
+outputBtn?.addEventListener("click", async ()=>{
+  const device=await chooseAudioOutput();
+  if(device && audioContext && typeof audioContext.setSinkId==="function"){
+    try{
+      await audioContext.setSinkId(device.deviceId);
+      setOutputStatus("Output: "+(device.label||"speaker Bluetooth"));
+    }catch(err){
+      console.warn("Gagal menerapkan output:",err);
+      setOutputStatus("Speaker terpilih, tetapi browser gagal menerapkan output.");
+    }
+  }
+});
